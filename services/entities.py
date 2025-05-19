@@ -23,11 +23,11 @@ class Files(db.Model):
 class Sentences(db.Model):
     __tablename__ = "sentences"
 
-    sentenceId = db.Column(db.Text)
+    sentenceId = db.Column(db.Integer)
     fileId = db.Column(db.Integer, db.ForeignKey("files.fileId", ondelete="CASCADE"))
     sentence = db.Column(db.Text)
-    sentence_time = db.Column(db.Date)
-    predict = db.Column(db.String(20))
+    sentence_time = db.Column(db.DateTime)
+    predict = db.Column(db.Text)
 
     __table_args__ = (
         db.PrimaryKeyConstraint("sentenceId", "fileId"),
