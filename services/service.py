@@ -6,9 +6,9 @@ import pandas as pd
 from .connect_db import db
 from datetime import datetime
 from .entities import Sentences, Files
-from ai.predict import handle_predict
-from sqlalchemy import select, func, and_
-
+from sqlalchemy import select, func
+import asyncio
+from api.call_api import async_predict, sync_predict
 
 def handle_get_list_files():
     try:
@@ -19,6 +19,7 @@ def handle_get_list_files():
     except Exception as e:
         print("Lỗi:", e)
         return jsonify({"message": "Lấy danh sách Files thất bại"}), 400
+
 
 
 def handle_predict_and_save():
@@ -33,47 +34,60 @@ def handle_predict_and_save():
     file_ext = os.path.splitext(fileName)[1].lower()
 
     try:
-        # 1. Lưu file vào bảng Files
+        # 1. Lưu metadata file
         new_file = Files(fileName=fileName)
         db.session.add(new_file)
-        db.session.flush()  # Lấy fileId ngay mà chưa commit
+        db.session.flush()
         file_id = new_file.fileId
 
-        # 2. Đọc file dữ liệu
+        # 2. Đọc file
         if file_ext == ".csv":
             df = pd.read_csv(uploaded_file)
         elif file_ext in [".xls", ".xlsx"]:
             df = pd.read_excel(uploaded_file)
         else:
-            raise ValueError("Định dạng file không được hỗ trợ.")
+            raise ValueError("Định dạng file không hỗ trợ.")
 
         if df.empty:
             raise ValueError("File không có nội dung.")
 
-        data_handle = handle_predict(df)
+        # kiểm tra cột sentence
+        if "sentence" not in df.columns:
+            raise ValueError("File thiếu cột 'sentence'.")
+
+        sentences = df["sentence"].tolist()
+        if len(sentences) == 0:
+            db.session.rollback()
+            print("Lỗi xử lý:", str(e))
+            return jsonify({"message": "Lỗi xử lý file.", "error": str(e)}), 500
+
         
-        # 3. Ghi dữ liệu từng câu vào bảng Sentences
-        for row in data_handle:
-            sentenceId = row.get("sentenceId")
-            sentence = row.get("sentence")
-            predict = row.get("predict")
-            sentence_time = row.get("sentence_time")
+        # 3. Gọi async_predict
+        predictions = asyncio.run(async_predict(sentences))
+         #3.1. Gọi API để dự đoán
+      #   predictions = sync_predict(sentences)  # Sử dụng hàm đồng bộ nếu không cần async
 
-            if sentenceId and sentence and sentence_time and predict is not None:
-                # Chuyển đổi thời gian nếu là chuỗi
-                if isinstance(sentence_time, str):
-                    sentence_time = datetime.strptime(sentence_time, "%Y-%m-%d %H:%M:%S")
+        # 4. Ghi dữ liệu Sentences tuần tự
+        for idx, pred in enumerate(predictions):
+            sentence_text = sentences[idx]
+            sentence_id = idx + 1
+            predict_label = pred.get("label")
+            sentence_time = df["sentence_time"][idx] if "sentence_time" in df.columns else None
 
-                new_sentence = Sentences(
-                    fileId=file_id,
-                    sentenceId=sentenceId,
-                    sentence=sentence,
-                    predict=predict,
-                    sentence_time=sentence_time
-                )
-                db.session.add(new_sentence)
+            if isinstance(sentence_time, str):
+                sentence_time = datetime.strptime(sentence_time, "%Y-%m-%d %H:%M:%S")
 
-        db.session.commit()  
+            new_sentence = Sentences(
+                fileId=file_id,
+                sentenceId=sentence_id,
+                sentence=sentence_text,
+                label=predict_label,
+                sentence_time=sentence_time if sentence_time else datetime.now()
+            )
+            db.session.add(new_sentence)
+
+        db.session.commit()
+
         return jsonify({
             "message": "Lưu và xử lý thành công!",
             "fileId": file_id,
@@ -116,7 +130,7 @@ def handle_statistic():
 
         query_time = db.session.query(
             time_label.label("period"),
-            Sentences.predict,
+            Sentences.label,
             func.count(Sentences.sentenceId).label("count")
         ).join(Files, Sentences.fileId == Files.fileId)
 
@@ -127,8 +141,8 @@ def handle_statistic():
 
         if selected_file_names:
             query_time = query_time.filter(Files.fileId.in_(selected_file_names))
-
-        query_time = query_time.group_by("period", Sentences.predict).order_by("period")
+         
+        query_time = query_time.group_by("period", Sentences.label).order_by("period")
         results_time = query_time.all()
 
         for period, label, count in results_time:
@@ -151,14 +165,14 @@ def handle_statistic():
     # ========================
     query_file = db.session.query(
         Files.fileName.label("file_name"),
-        Sentences.predict,
+        Sentences.label,
         func.count(Sentences.sentenceId).label("count")
     ).join(Files, Sentences.fileId == Files.fileId)
 
     if selected_file_names:
         query_file = query_file.filter(Files.fileId.in_(selected_file_names))
 
-    query_file = query_file.group_by(Files.fileName, Sentences.predict)
+    query_file = query_file.group_by(Files.fileName, Sentences.label)
     results_file = query_file.all()
 
     stats_by_file = {}

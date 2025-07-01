@@ -4,6 +4,5 @@ python-dotenv
 psycopg2-binary
 flask-cors
 pandas
-langchain
-langchain_openai
-langchain-groq
+asyncio
+httpx

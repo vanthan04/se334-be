@@ -27,7 +27,7 @@ class Sentences(db.Model):
     fileId = db.Column(db.Integer, db.ForeignKey("files.fileId", ondelete="CASCADE"))
     sentence = db.Column(db.Text)
     sentence_time = db.Column(db.DateTime)
-    predict = db.Column(db.Text)
+    label = db.Column(db.Text)
 
     __table_args__ = (
         db.PrimaryKeyConstraint("sentenceId", "fileId"),
