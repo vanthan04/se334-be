@@ -231,6 +231,7 @@ def handle_start_and_end_time():
 
 def handle_delete_files():
     data = request.get_json()
+   
     file_ids = data.get("selectedFilesNames", [])  
 
     if not file_ids or not isinstance(file_ids, list):

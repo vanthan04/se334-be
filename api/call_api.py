@@ -18,7 +18,7 @@ def split_batches(data, batch_size):
 async def predict_batch(batch, client):
     try:
         resp = await client.post(
-            f"{Config.base_url}/predict",
+            Config.base_url + "/predict",
             json={"sentences": batch},
             timeout=30
         )
